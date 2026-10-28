@@ -1,0 +1,7 @@
+- insert:
+    - id: travel-frog-fixture-model
+      name: dsh-travel-frog-fixture-model
+- id: agent-default-model
+  config:
+    provider: travel-frog-fixture
+    model: fixture

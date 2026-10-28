@@ -1,0 +1,4 @@
+- insert:
+    - id: travel-frog
+      name: dsh-travel-frog
+      config: {}

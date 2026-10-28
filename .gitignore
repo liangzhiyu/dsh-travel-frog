@@ -1,0 +1,5 @@
+node_modules/
+.verification/
+artifacts/
+.DS_Store
+*.tgz

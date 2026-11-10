@@ -87,20 +87,40 @@ function Art({ source }) {
   return source ? h('img', { className: 'tf-art', alt: '', src: source }) : null
 }
 
-function Postcard({ card, onOpenSession, showStory }) {
+function Paper({ title, label, source, cardId, live, children }) {
+  return h('article', {
+    className: source ? 'tf-paper tf-paper-illustrated' : 'tf-paper',
+    'data-card-id': cardId,
+    'aria-live': live ? 'polite' : undefined,
+  },
+  source && h('div', { className: 'tf-artwork' }, h(Art, { source })),
+  h('div', { className: 'tf-paper-content' },
+    label && h('p', { className: 'tf-kicker' }, label),
+    h('h2', null, title),
+    children))
+}
+
+function Postcard({ card, onOpenSession, onPack, showStory }) {
   const place = PLACES.find(item => item.id === card.placeId)
-  return h('article', { className: 'tf-paper tf-postcard', 'data-card-id': card.id },
-    h('h2', null, showStory ? place.name : '小蛙回来了'),
-    h(Art, { source: POSTCARD_ART[card.placeId] }),
-    !showStory && h('div', { className: 'tf-place' }, place.name),
-    card.note && h('p', { className: 'tf-note' }, card.note),
-    (showStory || !card.note) && h('p', { className: 'tf-story' }, showStory ? card.story : place.description),
+  return h(Paper, {
+    title: showStory ? place.name : '小蛙回来了',
+    label: showStory ? '旅途来信' : place.name,
+    source: POSTCARD_ART[card.placeId],
+    cardId: card.id,
+  },
+  card.note && h('p', { className: 'tf-note' }, card.note),
+  (showStory || !card.note) && h('p', { className: 'tf-story' }, showStory ? card.story : place.description),
+  (card.sessionId || onPack) && h('div', { className: 'tf-card-actions' },
     card.sessionId && h('button', {
       type: 'button',
-      className: 'tf-link',
+      className: 'tf-primary',
       onClick: () => onOpenSession(card.sessionId),
-    }, '回到会话')
-  )
+    }, '回到会话'),
+    onPack && h('button', {
+      type: 'button',
+      className: card.sessionId ? 'tf-secondary' : 'tf-primary',
+      onClick: onPack,
+    }, '准备下一份便当')))
 }
 
 function TravelHouse({ sourceSessionId, openSession }) {
@@ -210,19 +230,19 @@ function TravelHouse({ sourceSessionId, openSession }) {
   } else if (trip) {
     const waiting = clock < trip.startedAt
     content = h('div', { className: 'tf-stage' },
-      h('section', { className: 'tf-paper', 'aria-live': 'polite' },
-        h('h2', null, waiting ? '便当备好了' : '小蛙出门了'),
-        waiting && h(Art, { source: HOME_ART }),
-        h('p', { className: 'tf-quiet' }, waiting ? '它会自己挑个时候出门。' : '回来时，看看它去了哪里。')))
+      h(Paper, {
+        title: waiting ? '便当备好了' : '小蛙出门了',
+        label: waiting ? '小屋' : '旅途中',
+        source: waiting ? HOME_ART : undefined,
+        live: true,
+      },
+      h('p', { className: 'tf-quiet' }, waiting ? '它会自己挑个时候出门。' : '回来时，看看它去了哪里。')))
   } else if (latest && !packing) {
     content = h('div', { className: 'tf-stage' },
-      h(Postcard, { card: latest, onOpenSession: returnToSession }),
-      h('button', { type: 'button', className: 'tf-link tf-quiet', onClick: () => setPacking(true) }, '准备下一份便当'))
+      h(Postcard, { card: latest, onOpenSession: returnToSession, onPack: () => setPacking(true) }))
   } else {
     content = h('div', { className: 'tf-stage' },
-      h('section', { className: 'tf-paper' },
-        h('h2', null, '小蛙在家'),
-        h(Art, { source: HOME_ART }),
+      h(Paper, { title: '小蛙在家', label: '小屋', source: HOME_ART },
         h('form', { className: 'tf-form', onSubmit: prepare },
           sessionId && h('label', { className: 'tf-quiet' }, '留一句下次要做的事（选填）',
             h('input', { value: note, maxLength: 80, onChange: event => setNote(event.target.value) })),
@@ -234,7 +254,7 @@ function TravelHouse({ sourceSessionId, openSession }) {
     h('div', { className: 'tf-wrap' },
       h('header', { className: 'tf-top' },
         h('h1', null, '蛙旅'),
-        h('button', { type: 'button', className: 'tf-link', onClick: () => setAlbum(!album) }, album ? '回到小屋' : '相册')),
+        h('button', { type: 'button', className: 'tf-secondary', onClick: () => setAlbum(!album) }, album ? '回到小屋' : '相册')),
       error && h('p', { className: 'tf-alert', role: 'alert' }, error),
       content))
 }

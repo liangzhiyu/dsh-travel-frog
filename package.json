@@ -1,6 +1,6 @@
 {
   "name": "dsh-travel-frog",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "蛙旅：DeepSeek Harness 里的低打扰旅行与明信片收藏伙伴",
   "type": "module",
   "license": "MIT",

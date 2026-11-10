@@ -15,7 +15,7 @@ DeepSeek Harness 里的旅行伙伴。给小蛙备一份便当，等它自己出
 ```sh
 pnpm install --frozen-lockfile
 pnpm pack --pack-destination artifacts
-dsh plugin --profile web add ./artifacts/dsh-travel-frog-0.2.0.tgz
+dsh plugin --profile web add ./artifacts/dsh-travel-frog-0.2.1.tgz
 dsh web
 ```
 

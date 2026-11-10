@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BAGS, PLACES, DURATIONS, freshState, validateState, startTrip, settleTrip, updateCardStory, remainingMs } from '../core.js';
+import { BAGS, PLACES, DURATIONS, freshState, validateState, startTrip, prepareTrip, settleTrip, updateCardStory, remainingMs } from '../core.js';
 
 const start = (state = freshState(), now = 1000, id = 'trip-1', extra = {}) => startTrip(state, { bagId: 'forest', durationMs: 60_000, theme: '', ...extra }, now, id, () => 0);
 
@@ -82,4 +82,28 @@ test('start rejects invalid and overlong inputs without changing state', () => {
   assert.throws(() => start(freshState(), 8_640_000_000_000_000));
   for (const random of [-1, 1, NaN, Infinity]) assert.throws(() => startTrip(freshState(), { bagId: 'forest', durationMs: 60_000 }, 0, 'id', () => random));
   assert.throws(() => start(settleTrip(start(), 61_000)));
+});
+
+test('a packed lunch departs on its own and keeps the chosen session on the postcard', () => {
+  const original = freshState();
+  const packed = prepareTrip(original, { sessionId: 'session-a', note: ' 验证断网重试 ' }, 1000, 'linked', () => 0);
+  assert.equal(packed.trip.startedAt, 9000);
+  assert.equal(packed.trip.returnAt, 69000);
+  assert.equal(settleTrip(packed, 8999), packed);
+  const returned = settleTrip(packed, 70000);
+  assert.equal(returned.cards[0].sessionId, 'session-a');
+  assert.equal(returned.cards[0].note, '验证断网重试');
+  assert.equal(settleTrip(returned, 71000), returned);
+  assert.equal(original.trip, null);
+  assert.throws(() => prepareTrip(original, { sessionId: 'https://example.org' }, 1000, 'invalid', () => 0));
+});
+
+test('unlinked travel can follow an existing v1 postcard', () => {
+  const legacy = settleTrip(start(), 61000);
+  const packed = prepareTrip(legacy, {}, 62000, 'unlinked', () => 0);
+  assert.equal(packed.trip.returnAt - packed.trip.startedAt, 1_500_000);
+  const returned = settleTrip(packed, packed.trip.returnAt);
+  assert.deepEqual(returned.cards[0], legacy.cards[0]);
+  assert.equal(Object.hasOwn(returned.cards[1], 'sessionId'), false);
+  assert.equal(Object.hasOwn(returned.cards[1], 'note'), false);
 });

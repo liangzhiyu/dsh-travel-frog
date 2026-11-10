@@ -30,15 +30,19 @@ function string(value, max, label, nonempty = false) {
 function identifier(value) {
   if (typeof value !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(value)) fail('旅行编号无效。');
 }
-function object(value, keys) {
+function object(value, keys, optional = []) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) fail('存档对象无效。');
-  if (Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key))) fail('存档字段无效。');
+  if (keys.some(key => !Object.hasOwn(value, key)) || Object.keys(value).some(key => !keys.includes(key) && !optional.includes(key))) fail('存档字段无效。');
 }
 function destination(value) {
   identifier(value.id);
   const bag = BAGS.find(item => item.id === value.bagId);
   if (!bag || !bag.placeIds.includes(value.placeId)) fail('目的地与行囊不匹配。');
   string(value.theme, 80, '旅行主题');
+  if (Object.hasOwn(value, 'sessionId')) {
+    if (typeof value.sessionId !== 'string' || !/^[a-zA-Z0-9_.:-]{1,128}$/.test(value.sessionId)) fail('会话编号无效。');
+  }
+  if (Object.hasOwn(value, 'note')) string(value.note, 80, '会话备注');
 }
 
 export function freshState() { return { version: 1, trip: null, cards: [] }; }
@@ -48,7 +52,7 @@ export function validateState(state) {
   if (state.version !== 1 || !Array.isArray(state.cards) || state.cards.length > 200) fail('存档版本或卡片数量无效。');
   const ids = new Set();
   for (const card of state.cards) {
-    object(card, ['id', 'placeId', 'bagId', 'theme', 'returnedAt', 'story', 'ai']);
+    object(card, ['id', 'placeId', 'bagId', 'theme', 'returnedAt', 'story', 'ai'], ['sessionId', 'note']);
     destination(card);
     timestamp(card.returnedAt);
     string(card.story, 2000, '明信片正文', true);
@@ -56,7 +60,7 @@ export function validateState(state) {
     ids.add(card.id);
   }
   if (state.trip !== null) {
-    object(state.trip, ['id', 'startedAt', 'returnAt', 'placeId', 'bagId', 'theme']);
+    object(state.trip, ['id', 'startedAt', 'returnAt', 'placeId', 'bagId', 'theme'], ['sessionId', 'note']);
     destination(state.trip);
     timestamp(state.trip.startedAt);
     timestamp(state.trip.returnAt);
@@ -82,6 +86,19 @@ export function startTrip(state, { bagId, durationMs, theme = '' }, now, id, ran
   return { ...state, trip: { id, startedAt: now, returnAt: now + durationMs, placeId: choices[Math.floor(roll * choices.length)], bagId, theme: theme.trim() } };
 }
 
+export function prepareTrip(state, { sessionId, note = '' }, now, id, random = Math.random) {
+  timestamp(now);
+  string(note, 80, '会话备注');
+  const roll = random();
+  if (!Number.isFinite(roll) || roll < 0 || roll >= 1) fail('随机数必须在 0（含）至 1（不含）之间。');
+  const delay = 8_000 + Math.floor(roll * 10_000);
+  const durationMs = state.cards.length === 0 ? DURATIONS[0].durationMs : DURATIONS[1].durationMs;
+  const prepared = startTrip(state, { bagId: 'forest', durationMs }, now + delay, id, random);
+  if (sessionId !== undefined) prepared.trip.sessionId = sessionId;
+  if (note.trim()) prepared.trip.note = note.trim();
+  return validateState(prepared);
+}
+
 export function settleTrip(state, now) {
   validateState(state);
   timestamp(now);
@@ -94,6 +111,8 @@ export function settleTrip(state, now) {
     story: `今天走到了${place.name}。${place.description}我坐下来歇了歇，把这份${place.souvenir}收进行囊，想带回来给你看看。路上的风很轻，回家的路也很近。`,
     ai: false,
   };
+  if (trip.sessionId !== undefined) card.sessionId = trip.sessionId;
+  if (trip.note !== undefined) card.note = trip.note;
   return { ...state, trip: null, cards: [...state.cards, card].slice(-200) };
 }
 

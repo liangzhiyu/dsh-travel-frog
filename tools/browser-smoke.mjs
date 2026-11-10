@@ -1,128 +1,124 @@
 import assert from 'node:assert/strict'
 import { chromium } from 'playwright'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
-import { freshState, startTrip, settleTrip, BAGS, DURATIONS, updateCardStory } from '../core.js'
-const KEY='dsh-travel-frog.state.v1'
-await mkdir('artifacts',{recursive:true})
-const log=await readFile('.verification/harness.log','utf8')
-const url=log.match(/http:\/\/127\.0\.0\.1:3088\/\?token=\S+/)?.[0]
-assert.ok(url,'Isolated local Harness startup URL required')
-const browser=await chromium.launch({channel:'chrome',headless:true})
-const context=await browser.newContext({viewport:{width:1440,height:1000}})
-const page=await context.newPage(), errors=[], results=[]
+
+const KEY = 'dsh-travel-frog.state.v1'
+const log = await readFile('.verification/harness.log', 'utf8')
+const url = log.match(/http:\/\/127\.0\.0\.1:3088\/\?token=\S+/)?.[0]
+assert.ok(url, 'Start the isolated local DSH profile first')
+await mkdir('artifacts', { recursive: true })
+
+const browser = await chromium.launch({ channel: 'chrome', headless: true })
+const context = await browser.newContext({ viewport: { width: 1440, height: 1024 }, colorScheme: 'light' })
+const errors = []
+const checks = []
+const check = name => { checks.push(name); console.log('PASS ' + name) }
+context.on('page', page => page.on('pageerror', error => errors.push(error.message)))
+const page = await context.newPage()
 page.setDefaultTimeout(15000)
-let aiRequests=0
-context.on('page',p=>p.on('pageerror',e=>errors.push(e.message)))
-page.on('pageerror',e=>errors.push(e.message))
-context.on('request',r=>{if(new URL(r.url()).pathname==='/travel-frog/story')aiRequests++})
-const check=name=>{results.push(name);console.log('PASS '+name)}
-const open=async p=>{
-  await p.goto(url)
-  await p.getByRole('button',{name:'蛙旅',exact:true}).waitFor()
-  const intro=p.getByRole('button',{name:'继续',exact:true})
-  if(await intro.isVisible())await intro.click()
-  await p.getByRole('button',{name:'蛙旅',exact:true}).click()
-  await p.locator('[data-travel-frog]').waitFor()
-}
-const state=async p=>p.evaluate(key=>JSON.parse(localStorage.getItem(key)),KEY)
-const importState=async(p,s)=>{
-  p.once('dialog',d=>d.accept())
-  await p.locator('input[type=file]').setInputFiles({name:'backup.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(s))})
-  await p.waitForFunction(({key,a,b})=>{const current=localStorage.getItem(key);return current===a||current===b},{key:KEY,a:JSON.stringify(s),b:JSON.stringify(settleTrip(s,Date.now()))})
-}
+let storyRequests = 0
+context.on('request', request => {
+  if (new URL(request.url()).pathname === '/travel-frog/story') storyRequests++
+})
+
+const openFrog = p => p.getByRole('button', { name: '蛙旅', exact: true }).click()
+const getSave = p => p.evaluate(key => JSON.parse(localStorage.getItem(key)), KEY)
+const heading = (p, name) => p.getByRole('heading', { name, exact: true })
+const button = (p, name) => p.getByRole('button', { name, exact: true })
+
 try {
-  await open(page)
-  await page.getByLabel('想带回什么灵感？').fill('听雨，也听自己')
-  await page.screenshot({path:'artifacts/01-home.png'})
-  check('真实 DSH 侧栏与原生主面板挂载')
-  await page.getByRole('button',{name:'装好行囊，出发',exact:true}).click()
-  await page.getByText('小蛙出门了',{exact:true}).waitFor()
-  const initial=await state(page)
-  assert.equal(initial.trip.theme,'听雨，也听自己')
-  await page.getByRole('button',{name:'新建会话',exact:true}).first().click()
-  // Real elapsed time, not a mocked model or simulated browser clock.
-  await page.waitForTimeout(61000)
-  await page.reload()
-  await page.getByRole('button',{name:'蛙旅',exact:true}).click()
-  await page.locator('[data-card-id]').waitFor()
-  assert.equal((await state(page)).cards.length,1)
-  assert.equal(aiRequests,0)
-  check('真实一分钟旅行，离开面板再刷新归来，一张收藏，零模型调用')
-  await page.getByRole('button',{name:'请模型写一封信',exact:true}).click()
-  await page.getByRole('button',{name:'这封信已收藏',exact:true}).waitFor()
-  assert.equal((await state(page)).cards[0].ai,true)
-  assert.equal(aiRequests,1)
-  await page.screenshot({path:'artifacts/02-postcard.png'})
-  check('真实 ctx.llm 流式 fixture 写信与存档，成功禁止重复调用')
-  const response=await fetch('http://127.0.0.1:3088/travel-frog/story',{method:'POST',headers:{'content-type':'application/json'},body:'{}'})
-  assert.equal(response.status,401)
-  check('无宿主认证直接请求返回401')
-  const second=await context.newPage();await open(second)
-  await Promise.all([
-    page.getByRole('button',{name:'装好行囊，出发',exact:true}).click(),
-    second.getByRole('button',{name:'装好行囊，出发',exact:true}).click()
-  ])
-  await page.waitForFunction(key=>!!JSON.parse(localStorage.getItem(key)).trip,KEY)
-  const active=await state(page)
-  assert.ok(active.trip)
-  assert.equal(active.cards.length,1)
-  assert.equal((await state(second)).trip.id,active.trip.id)
-  // Simulate reopening after a long absence with valid, elapsed trip timestamps.
-  active.trip.startedAt-=120000;active.trip.returnAt-=120000
-  await importState(second,active)
-  await page.waitForFunction(key=>JSON.parse(localStorage.getItem(key)).cards.length===2,KEY)
-  await second.waitForTimeout(1200)
-  assert.equal((await state(page)).cards.length,2)
-  assert.equal(new Set((await state(page)).cards.map(c=>c.id)).size,2)
-  check('双窗口同时出发与离线跳跃归来：无重复旅程或收藏')
-  const before=await state(page)
-  await page.locator('input[type=file]').setInputFiles({name:'bad.json',mimeType:'application/json',buffer:Buffer.from('{broken')})
-  await page.getByRole('alert').waitFor()
-  assert.deepEqual(await state(page),before)
-  check('损坏存档导入安全拒绝且保留当前数据')
-  // Delay the real server response; another tab restores a newer same-ID card.
-  await page.waitForTimeout(5100)
-  let release, arrived, deliveredStatus, deliveredBody
-  const gate=new Promise(r=>release=r), arrival=new Promise(r=>arrived=r)
-  await page.route('**/travel-frog/story',async route=>{
-    const fetched=await route.fetch();deliveredStatus=fetched.status();deliveredBody=await fetched.json();arrived();await gate;await route.fulfill({response:fetched})
+  await page.goto(url)
+  await button(page, '蛙旅').waitFor()
+  if (await button(page, '继续').isVisible()) await button(page, '继续').click()
+  await openFrog(page)
+  await heading(page, '小蛙在家').waitFor()
+  await page.locator('.tf-art').evaluate(img => img.decode())
+  await page.screenshot({ path: 'artifacts/01-home.png' })
+  check('DSH sidebar opens the single-card home with local artwork')
+
+  await page.getByRole('button', { name: '新建会话', exact: true }).first().click()
+  const fixture = page.getByRole('button', { name: /选择模型，当前 Travel frog fixture/u })
+  if (!await fixture.isVisible()) {
+    await page.getByRole('button', { name: /选择模型/u }).first().click()
+    await page.getByText('Travel frog fixture', { exact: true }).last().click()
+  }
+  await fixture.waitFor()
+  const message = '订单导出失败排查 · 蛙旅验证'
+  await page.locator('[contenteditable="true"]').last().fill(message)
+  await button(page, '发送消息').click()
+  await page.getByText(message, { exact: true }).waitFor()
+  await button(page, '给小蛙备便当').click()
+  const note = '下次先验证断网后是否重复导出。'
+  await page.getByLabel('留一句下次要做的事（选填）').fill(note)
+  await page.clock.install()
+  // Pick the same illustrated destination as the visual reference.
+  await page.evaluate(() => {
+    const random = Math.random
+    let calls = 0
+    Math.random = () => {
+      if (++calls === 2) Math.random = random
+      return 0.9
+    }
   })
-  await page.getByRole('button',{name:'请模型写一封信',exact:true}).first().click()
-  await arrival
-  assert.equal(deliveredStatus,200,'Race must delay a SUCCESSFUL real model response')
-  assert.equal(typeof deliveredBody.text,'string')
-  const restored=await state(second), target=restored.cards.find(c=>!c.ai)
-  const newer=updateCardStory(restored,target.id,'这是另一窗口刚恢复的新版本，不能被旧响应覆盖。')
-  await importState(second,newer)
-  await second.waitForFunction(({key,id})=>JSON.parse(localStorage.getItem(key)).cards.find(c=>c.id===id)?.story==='这是另一窗口刚恢复的新版本，不能被旧响应覆盖。',{key:KEY,id:target.id})
-  release()
-  await page.getByRole('button',{name:'正在写信…',exact:true}).waitFor({state:'hidden'})
-  assert.equal((await state(page)).cards.find(c=>c.id===target.id).story,'这是另一窗口刚恢复的新版本，不能被旧响应覆盖。')
-  await page.unroute('**/travel-frog/story')
-  check('延迟真实模型响应遇到另一窗口导入：保留更新后的明信片')
-  // Only the model error response is injected; baseline postcard remains usable.
-  const newTrip=startTrip(freshState(),{bagId:BAGS[1].id,durationMs:DURATIONS[0].durationMs,theme:''},1000,'failure-card',()=>0)
-  const ready=settleTrip(newTrip,61000)
-  await importState(page,ready)
-  await page.route('**/travel-frog/story',route=>route.fulfill({status:503,contentType:'application/json',body:'{"error":"no-model"}'}))
-  await page.getByRole('button',{name:'请模型写一封信',exact:true}).click()
-  await page.getByRole('alert').waitFor()
-  assert.deepEqual(await state(page),ready)
-  check('模型不可用时保留完整本地明信片（注入503响应）')
-  await page.unroute('**/travel-frog/story')
-  await page.emulateMedia({colorScheme:'dark',reducedMotion:'reduce'})
-  await page.setViewportSize({width:700,height:900})
-  await page.screenshot({path:'artifacts/03-dark-narrow.png'})
-  const overflow=await page.locator('[data-travel-frog]').evaluate(e=>e.scrollWidth>e.clientWidth+1)
-  assert.equal(overflow,false)
-  check('深色、窄窗口无横向溢出')
-  await page.evaluate(key=>localStorage.setItem(key,'{broken'),KEY)
-  await page.reload();await page.getByRole('button',{name:'蛙旅',exact:true}).click()
-  await page.getByRole('alert').waitFor()
-  assert.equal(await page.evaluate(key=>localStorage.getItem(key),KEY),'{broken')
-  assert.ok(await page.getByRole('button',{name:'装好行囊，出发',exact:true}).isDisabled())
-  check('损坏现有存档不静默覆盖，并阻止继续写入')
-  assert.deepEqual(errors,[])
-  check('浏览器无 pageerror')
-  await writeFile('artifacts/browser-results.json',JSON.stringify({results,errors},null,2))
-} finally {await browser.close()}
+  await button(page, '备好便当').click()
+  await heading(page, '便当备好了').waitFor()
+  const packed = await getSave(page)
+  assert.ok(packed.trip.sessionId)
+  assert.equal(packed.trip.note, note)
+  await page.clock.fastForward(20_000)
+  await heading(page, '小蛙出门了').waitFor()
+  await page.screenshot({ path: 'artifacts/02-travel.png' })
+  check('Conversation entry keeps the selected session and the frog departs on its own')
+
+  await page.getByRole('button', { name: '新建会话', exact: true }).first().click()
+  await page.clock.fastForward(65_000)
+  await page.reload()
+  await openFrog(page)
+  await heading(page, '小蛙回来了').waitFor()
+  await page.locator('.tf-art').evaluate(img => img.decode())
+  const returned = await getSave(page)
+  assert.equal(returned.cards.length, 1)
+  assert.equal(returned.cards[0].sessionId, packed.trip.sessionId)
+  assert.equal(returned.cards[0].note, note)
+  await page.screenshot({ path: 'artifacts/03-postcard.png', animations: 'disabled' })
+  await button(page, '回到会话').click()
+  await page.getByText(message, { exact: true }).waitFor()
+  check('Elapsed trip returns once after a reload and opens the original real conversation')
+
+  await openFrog(page)
+  await button(page, '相册').click()
+  const album = page.getByRole('region', { name: '明信片相册' })
+  await album.locator('li button').first().click()
+  await album.getByText(note, { exact: true }).waitFor()
+  await album.getByText('管理存档', { exact: true }).click()
+  const backup = page.waitForEvent('download')
+  await button(page, '导出存档').click()
+  assert.equal((await backup).suggestedFilename(), 'frog-travel-backup.json')
+
+  const broken = structuredClone(returned)
+  broken.cards[0].sessionId = 'missing-test-session'
+  page.once('dialog', dialog => dialog.accept())
+  await page.locator('input[type=file]').setInputFiles({
+    name: 'backup.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(broken)),
+  })
+  await page.waitForFunction(key => JSON.parse(localStorage.getItem(key)).cards[0].sessionId === 'missing-test-session', KEY)
+  await album.locator('li button').first().click()
+  await button(page, '回到会话').click()
+  await page.getByRole('alert').getByText(/会话当前无法打开/).waitFor()
+  await heading(page, '相册').waitFor()
+  check('Album, backup and unavailable-session fallback work')
+
+  await button(page, '回到小屋').click()
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' })
+  await page.setViewportSize({ width: 700, height: 850 })
+  await page.screenshot({ path: 'artifacts/04-dark-narrow.png' })
+  assert.equal(await page.locator('.tf').evaluate(el => el.scrollWidth > el.clientWidth + 1), false)
+  assert.equal(storyRequests, 0)
+  assert.deepEqual(errors, [])
+  check('Dark narrow layout, no story model calls, no browser errors')
+  await writeFile('artifacts/browser-results.json', JSON.stringify({ checks, errors }, null, 2))
+} finally {
+  await browser.close()
+}

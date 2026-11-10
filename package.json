@@ -1,6 +1,6 @@
 {
   "name": "dsh-travel-frog",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "蛙旅：DeepSeek Harness 里的低打扰旅行与明信片收藏伙伴",
   "type": "module",
   "license": "MIT",
@@ -22,7 +22,9 @@
     "cordis.patch.yml",
     "README.md",
     "LICENSE",
-    "docs/"
+    "docs/",
+    "assets/TABLER-LICENSE.txt",
+    "design-qa.md"
   ],
   "keywords": [
     "dsh-plugin",
@@ -43,13 +45,16 @@
       "immediately": true,
       "inject": [
         "@deepseek-ai/dsh-client-ui-layout",
-        "@deepseek-ai/dsh-client-ui-sidebar"
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-api-session-controller"
       ]
     },
     "catalog": {
       "summary": {
-        "zh": "准备行囊，等待归来，收藏原创明信片。可主动使用宿主模型写游记。",
-        "en": "A quiet travel companion with postcards and optional model-written stories."
+        "zh": "给小蛙备好便当，等它带回明信片。可将明信片关联到会话。",
+        "en": "Pack a lunch and wait for a postcard. Optionally link it to a conversation."
       },
       "category": "ui"
     }
